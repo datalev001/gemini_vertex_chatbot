@@ -1,41 +1,11 @@
 
-
-
-# this chatbot Python Flask code is to use GPT API in Azure: no datasources 
-#  python C:\backupcgi\000Ed_CGI\chatbot\chatgem.py
-#  http://127.0.0.1:5000/ (Press CTRL+C to quit)
-
-
-'''
-print(sys.executable)
-C:\anaconda3\envs\graphrag-env\python.exe
-
-conda activate graphrag-env
-
-python --version
-
-'''
-
-#####Chatbot: flask + Gemini + LangChain + 
-### RAG (vector DB search) + local knowledge base(creditcard.txt 
-### on local drive) for RAG + context/session handling
-'''
-Below is an example of a complete, concise Flask chatbot 
-application that uses Google Gemini (via a hypothetical 
-  GeminiLLM in LangChain) together with a retrieval‐augmented
- generation (RAG) approach using a FAISS vector store built 
- from your knowledge base file (on local pc drive). In this example,
- we also maintain conversation history in a local SQLite database.
- (Make sure to install the required LangChain dependencies
-  and adjust the GeminiLLM import/initialization as needed 
-  for your environment.)
-'''
 import os
 import sqlite3
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template
 from dotenv import load_dotenv
-from google.cloud import aiplatform
+from google.cloud import aiplatform, storage
+from google import genai
 
 # --- LangChain & Google Gemini Imports ---
 from langchain_google_vertexai import ChatVertexAI
@@ -46,7 +16,6 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain.chains import ConversationalRetrievalChain
 from langchain.docstore.document import Document
 
-import os
 import certifi
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
@@ -58,28 +27,42 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # ---------------------------------------------
-# Configuration: GCP project, model details, and local KB file path
+# Configuration: GCP project, model details, and cloud knowledge base (GCS)
 # ---------------------------------------------
-PROJECT_ID = "chatbotragproject"       # Replace with your project ID
-LOCATION = "us-central1"               # e.g., us-central1
-MODEL_NAME = "gemini-2.0-flash-001"      # Replace with the actual model name (or try "chat-bison" if needed)
-KNOWLEDGE_FILE_PATH = r"C:\backupcgi\000Ed_CGI\creditcard.txt"  # Use raw string for Windows paths
+PROJECT_ID = "chatbotragproject"  # Replace with your project ID
+LOCATION = "us-central1"
+MODEL_NAME = "gemini-2.0-flash-001"
+
+# Google Cloud Storage (GCS) Bucket Configuration
+BUCKET_NAME = "kelvinbucket"  # Replace with your GCS bucket name
+GCS_KNOWLEDGE_FILE = "creditcard_QA.txt"  # File stored in the GCS bucket
 
 # Initialize Google Cloud platform (ADC must be set via gcloud)
 aiplatform.init(project=PROJECT_ID, location=LOCATION)
 
-# --- Flask App Initialization ---
-app = Flask(__name__, template_folder='templates')
-app.secret_key = "super secret key"
+# ---------------------------------------------
+# Function to Download Knowledge Base from GCS
+# ---------------------------------------------
+def download_knowledge_from_gcs():
+    """
+    Downloads the knowledge base file (creditcard_QA.txt) from GCS and returns its content.
+    """
+    storage_client = storage.Client(project=PROJECT_ID)
+    bucket = storage_client.bucket(BUCKET_NAME)
+    blob = bucket.blob(GCS_KNOWLEDGE_FILE)
+
+    if not blob.exists():
+        raise FileNotFoundError(f"{GCS_KNOWLEDGE_FILE} not found in gs://{BUCKET_NAME}")
+
+    text_data = blob.download_as_text(encoding="utf-8")
+    return text_data
 
 # ---------------------------------------------
 # Load and Process the Knowledge Base
 # ---------------------------------------------
-if not os.path.exists(KNOWLEDGE_FILE_PATH):
-    raise FileNotFoundError(f"{KNOWLEDGE_FILE_PATH} not found on local drive.")
-
-with open(KNOWLEDGE_FILE_PATH, 'r', encoding='utf-8') as f:
-    kb_content = f.read()
+print("Downloading knowledge base from Google Cloud Storage...")
+kb_content = download_knowledge_from_gcs()
+print("Knowledge base successfully loaded from GCS.")
 
 # Split the text into chunks (adjust chunk_size and overlap as needed)
 text_splitter = CharacterTextSplitter(separator="\n\n", chunk_size=1000, chunk_overlap=200)
@@ -177,6 +160,9 @@ def reset_history_internal():
 # ---------------------------------------------
 # Flask Routes
 # ---------------------------------------------
+app = Flask(__name__, template_folder='templates')
+app.secret_key = "super secret key"
+
 @app.route('/')
 def chat():
     # Optionally reset conversation history at the start of a session
@@ -223,3 +209,6 @@ def dialog_hist():
 # ---------------------------------------------
 if __name__ == '__main__':
     app.run()
+
+
+
